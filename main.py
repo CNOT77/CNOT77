@@ -1,0 +1,194 @@
+import os
+import requests
+import telebot
+from flask import Flask
+from threading import Thread
+from telebot.types import (
+    InputMediaPhoto,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
+
+# =========================
+# Flask Keep Alive
+# =========================
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "I'm alive", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# =========================
+# Telegram Bot
+# =========================
+
+# التوكن راح ينسحب من إعدادات Render بأمان
+TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_ID = "@naaafs"
+
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+
+# =========================
+# Check Subscription
+# =========================
+
+def check_membership(user_id):
+    try:
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        print("Membership Error:", e)
+        return False
+
+def subscription_markup():
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton(
+            "اشترك بالقناة",
+            url=f"https://t.me/{CHANNEL_ID[1:]}"
+        )
+    )
+    return markup
+
+# =========================
+# Start Command
+# =========================
+
+@bot.message_handler(commands=['start'])
+def start(message):
+
+    if not check_membership(message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            "لازم تشترك بالقناة أولاً ❤️",
+            reply_markup=subscription_markup()
+        )
+        return
+
+    bot.reply_to(
+        message,
+        "هلا بيك 🌹\nدز رابط تيك توك واني احمله الك بأعلى جودة."
+    )
+
+# =========================
+# TikTok Downloader
+# =========================
+
+@bot.message_handler(func=lambda m: m.text and "tiktok.com" in m.text)
+def tiktok_download(message):
+
+    if not check_membership(message.from_user.id):
+        bot.send_message(
+            message.chat.id,
+            "اشترك بالقناة أولاً ❤️",
+            reply_markup=subscription_markup()
+        )
+        return
+
+    url = message.text.strip()
+
+    wait_msg = bot.reply_to(message, "جاري التحميل... ⏳")
+
+    try:
+
+        api = f"https://www.tikwm.com/api/?url={url}"
+
+        response = requests.get(api, timeout=30)
+
+        data = response.json().get("data")
+
+        if not data:
+            bot.edit_message_text(
+                "فشل التحميل أو الرابط خاص.",
+                message.chat.id,
+                wait_msg.message_id
+            )
+            return
+
+        # =========================
+        # الصور
+        # =========================
+
+        if data.get("images"):
+
+            media = []
+
+            for img in data["images"][:10]:
+                media.append(InputMediaPhoto(img))
+
+            sent = bot.send_media_group(
+                message.chat.id,
+                media
+            )
+
+            if data.get("music"):
+
+                audio_content = requests.get(
+                    data["music"],
+                    timeout=30
+                ).content
+
+                bot.send_voice(
+                    message.chat.id,
+                    audio_content,
+                    reply_to_message_id=sent[0].message_id
+                )
+
+        # =========================
+        # الفيديو
+        # =========================
+
+        elif data.get("play"):
+
+            video_url = data["play"]
+
+            bot.send_video(
+                message.chat.id,
+                video_url,
+                caption="تم التحميل بنجاح ❤️"
+            )
+
+        else:
+
+            bot.send_message(
+                message.chat.id,
+                "ماكدر احمل هذا الرابط."
+            )
+
+        bot.delete_message(
+            message.chat.id,
+            wait_msg.message_id
+        )
+
+    except Exception as e:
+
+        print("Download Error:", e)
+
+        bot.edit_message_text(
+            "صارت مشكلة أثناء التحميل.",
+            message.chat.id,
+            wait_msg.message_id
+        )
+
+# =========================
+# Run Everything
+# =========================
+def run_bot():
+
+    print("Bot Started")
+
+    bot.infinity_polling(
+        timeout=30,
+        long_polling_timeout=30
+    )
+
+if name == "__main__":
+
+    Thread(target=run_web).start()
+
+    run_bot()
