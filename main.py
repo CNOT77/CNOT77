@@ -27,7 +27,6 @@ def run_web():
 # Telegram Bot
 # =========================
 
-# التوكن راح ينسحب من إعدادات Render بأمان
 TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = "@naaafs"
 
@@ -178,6 +177,7 @@ def tiktok_download(message):
 # =========================
 # Run Everything
 # =========================
+
 def run_bot():
 
     print("Bot Started")
@@ -187,7 +187,7 @@ def run_bot():
         long_polling_timeout=30
     )
 
-if name == "__main__":
+if __name__ == "__main__":
 
     Thread(target=run_web).start()
 
