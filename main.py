@@ -1,20 +1,14 @@
 import os
-import requests
 import telebot
+import yt_dlp
 from flask import Flask
 from threading import Thread
-from telebot.types import (
-    InputMediaPhoto,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # =========================
-# Flask Keep Alive
+# Flask Server (Keep Alive)
 # =========================
-
 app = Flask(__name__)
-
 @app.route('/')
 def home():
     return "I'm alive", 200
@@ -26,16 +20,17 @@ def run_web():
 # =========================
 # Telegram Bot
 # =========================
-
 TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = "@naaafs"
-
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+
+DOWNLOAD_FOLDER = "downloads"
+if not os.path.exists(DOWNLOAD_FOLDER):
+    os.makedirs(DOWNLOAD_FOLDER)
 
 # =========================
 # Check Subscription
 # =========================
-
 def check_membership(user_id):
     try:
         member = bot.get_chat_member(CHANNEL_ID, user_id)
@@ -47,20 +42,15 @@ def check_membership(user_id):
 def subscription_markup():
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton(
-            "اشترك بالقناة",
-            url=f"https://t.me/{CHANNEL_ID[1:]}"
-        )
+        InlineKeyboardButton("اشترك بالقناة", url=f"https://t.me/{CHANNEL_ID[1:]}")
     )
     return markup
 
 # =========================
 # Start Command
 # =========================
-
 @bot.message_handler(commands=['start'])
 def start(message):
-
     if not check_membership(message.from_user.id):
         bot.send_message(
             message.chat.id,
@@ -71,16 +61,14 @@ def start(message):
 
     bot.reply_to(
         message,
-        "هلا بيك 🌹\nدز رابط تيك توك واني احمله الك بأعلى جودة."
+        "هلا بيك 🌹\nدز رابط تيك توك واني احمله الك بأعلى جودة (HD)."
     )
 
 # =========================
-# TikTok Downloader
+# TikTok Downloader (yt-dlp)
 # =========================
-
 @bot.message_handler(func=lambda m: m.text and "tiktok.com" in m.text)
-def tiktok_download(message):
-
+def download_tiktok(message):
     if not check_membership(message.from_user.id):
         bot.send_message(
             message.chat.id,
@@ -90,105 +78,45 @@ def tiktok_download(message):
         return
 
     url = message.text.strip()
-
-    wait_msg = bot.reply_to(message, "جاري التحميل... ⏳")
-
+    msg = bot.reply_to(message, "جاري التحميل بأعلى جودة... ⏳")
+    
     try:
-
-        api = f"https://www.tikwm.com/api/?url={url}"
-
-        response = requests.get(api, timeout=30)
-
-        data = response.json().get("data")
-
-        if not data:
-            bot.edit_message_text(
-                "فشل التحميل أو الرابط خاص.",
-                message.chat.id,
-                wait_msg.message_id
-            )
-            return
-
-        # =========================
-        # الصور
-        # =========================
-
-        if data.get("images"):
-
-            media = []
-
-            for img in data["images"][:10]:
-                media.append(InputMediaPhoto(img))
-
-            sent = bot.send_media_group(
-                message.chat.id,
-                media
-            )
-
-            if data.get("music"):
-
-                audio_content = requests.get(
-                    data["music"],
-                    timeout=30
-                ).content
-
-                bot.send_voice(
-                    message.chat.id,
-                    audio_content,
-                    reply_to_message_id=sent[0].message_id
-                )
-
-        # =========================
-        # الفيديو
-        # =========================
-
-        elif data.get("play"):
-
-            video_url = data["play"]
-
+        ydl_opts = {
+            'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
+            'format': 'best',
+            'quiet': True,
+            'noplaylist': True
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+            
+        with open(file_path, 'rb') as video:
             bot.send_video(
                 message.chat.id,
-                video_url,
-                caption="تم التحميل بنجاح ❤️"
+                video,
+                caption="تم التحميل بأعلى جودة ❤️"
             )
-
-        else:
-
-            bot.send_message(
-                message.chat.id,
-                "ماكدر احمل هذا الرابط."
-            )
-
-        bot.delete_message(
-            message.chat.id,
-            wait_msg.message_id
-        )
-
+            
+        os.remove(file_path) # مسح الفيديو من السيرفر بعد إرساله حتى لا يمتلئ
+        bot.delete_message(message.chat.id, msg.message_id)
+        
     except Exception as e:
-
-        print("Download Error:", e)
-
+        print("Error:", e)
         bot.edit_message_text(
-            "صارت مشكلة أثناء التحميل.",
+            "صار خطأ أثناء التحميل، تأكد إن الرابط صحيح ومو خاص.",
             message.chat.id,
-            wait_msg.message_id
+            msg.message_id
         )
 
 # =========================
-# Run Everything
+# Run Bot
 # =========================
-
 def run_bot():
-
-    print("Bot Started")
-
-    bot.infinity_polling(
-        timeout=30,
-        long_polling_timeout=30
-    )
+    print("Bot Started with yt-dlp")
+    bot.infinity_polling(timeout=30, long_polling_timeout=30)
 
 if __name__ == "__main__":
-
     Thread(target=run_web).start()
-
     run_bot()
