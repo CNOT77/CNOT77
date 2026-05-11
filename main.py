@@ -1,9 +1,10 @@
 import os
+import requests
 import telebot
 import yt_dlp
 from flask import Flask
 from threading import Thread
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 
 # =========================
 # CONFIG
@@ -15,7 +16,7 @@ DOWNLOAD_FOLDER = "downloads"
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# قاموس لحفظ الروابط مؤقتاً حتى نتجنب مشكلة حجم أزرار تليكرام
+# قاموس لحفظ الروابط مؤقتاً
 user_links = {}
 
 # =========================
@@ -78,7 +79,7 @@ def handle_links(message):
         return
 
     url = message.text.strip()
-    user_links[message.from_user.id] = url # حفظ الرابط بالذاكرة
+    user_links[message.from_user.id] = url
 
     markup = InlineKeyboardMarkup()
     btn1 = InlineKeyboardButton("تحميل فيديو HD 🎥", callback_data="download_video")
@@ -88,7 +89,7 @@ def handle_links(message):
     bot.reply_to(message, "اختار نوع التحميل:", reply_markup=markup)
 
 # =========================
-# DOWNLOAD FUNCTION
+# DOWNLOAD FUNCTION (yt-dlp)
 # =========================
 def download_media(url, audio_only=False):
     ydl_opts = {
@@ -133,9 +134,37 @@ def callback_handler(call):
         return
 
     action = call.data
-    msg = bot.edit_message_text("جاري التحميل بأعلى جودة... ⏳", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("جاري التحميل... ⏳", call.message.chat.id, call.message.message_id)
     
     try:
+        # 1. معالجة صور التيك توك أولاً
+        if "tiktok.com" in url:
+            try:
+                api = f"https://www.tikwm.com/api/?url={url}"
+                res = requests.get(api, timeout=10).json()
+                data = res.get("data", {})
+                
+                # إذا الرابط عبارة عن صور
+                if data.get("images"):
+                    if action == "download_audio" and data.get("music"):
+                        audio_content = requests.get(data["music"], timeout=10).content
+                        bot.send_voice(call.message.chat.id, audio_content)
+                    else:
+                        media = []
+                        for img in data["images"][:10]: # ناخذ أول 10 صور حد أقصى
+                            media.append(InputMediaPhoto(img))
+                        sent = bot.send_media_group(call.message.chat.id, media)
+                        # ندز الصوت كبصمة ويه الصور
+                        if data.get("music"):
+                            audio_content = requests.get(data["music"], timeout=10).content
+                            bot.send_voice(call.message.chat.id, audio_content, reply_to_message_id=sent[0].message_id)
+                    
+                    bot.delete_message(call.message.chat.id, msg.message_id)
+                    return # نطلع لأن التحميل كمل
+            except Exception as e:
+                print("TikTok Photo API Error:", e) # إذا فشل الـ API، راح يكمل للـ yt-dlp كاحتياط
+
+        # 2. معالجة الفيديوات والصوت العادي (انستا، يوتيوب، تيك توك فيديو)
         if action == "download_audio":
             file_path = download_media(url, audio_only=True)
             with open(file_path, "rb") as audio:
@@ -143,11 +172,11 @@ def callback_handler(call):
         else:
             file_path = download_media(url, audio_only=False)
             with open(file_path, "rb") as video:
-                # إرسال كـ Document حتى نحافظ على الجودة الأصلية
                 bot.send_document(call.message.chat.id, video, caption="تم التحميل بأعلى جودة ❤️")
         
         os.remove(file_path)
         bot.delete_message(call.message.chat.id, msg.message_id)
+        
     except Exception as e:
         print("Download Error:", e)
         bot.edit_message_text("صار خطأ أثناء التحميل.\nتأكد إن الرابط صحيح ومو خاص.", call.message.chat.id, msg.message_id)
