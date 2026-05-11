@@ -71,7 +71,6 @@ def handle_tiktok(message):
     msg = bot.reply_to(message, "جاري التحميل... ⏳")
     
     try:
-        # جلب البيانات من API
         api = f"https://www.tikwm.com/api/?url={url}"
         res = requests.get(api, timeout=20).json()
         data = res.get("data", {})
@@ -83,22 +82,21 @@ def handle_tiktok(message):
         # 1. إذا الرابط صور (Slideshow)
         if data.get("images"):
             media = []
-            for img in data["images"][:10]: # أقصى حد 10 صور للترتيب
+            for img in data["images"][:10]:
                 media.append(InputMediaPhoto(img))
             
             sent = bot.send_media_group(message.chat.id, media)
             
-            # إرسال الصوت كبصمة
             if data.get("music"):
                 audio_content = requests.get(data["music"], timeout=20).content
                 bot.send_voice(message.chat.id, audio_content, reply_to_message_id=sent[0].message_id)
         
         # 2. إذا الرابط فيديو
         elif data.get("play"):
-            # نختار أعلى جودة متوفرة (HD)
-            video_url = data.get("hdplay") or data.get("play")
+            # فكرة صديقك: نجيب أفضل جودة متوفرة (HD)
+            video_url = data.get("hdplay") or data.get("play") or data.get("wmplay")
             
-            # نرسله كـ فيديو يشتغل مباشرة مو كملف (Document)
+            # نرسله كـ فيديو حتى يشتغل بالشاشة مباشرة (مثل ما إنت طلبت)
             bot.send_video(
                 message.chat.id,
                 video_url,
@@ -118,7 +116,7 @@ def handle_tiktok(message):
 # RUN
 # =========================
 def run_bot():
-    print("Bot Started (TikTok Only)")
+    print("Bot Started")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
 
 if __name__ == "__main__":
