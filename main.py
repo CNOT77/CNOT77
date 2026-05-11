@@ -1,10 +1,9 @@
 import os
-import requests
 import telebot
 import yt_dlp
 from flask import Flask
 from threading import Thread
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # =========================
 # CONFIG
@@ -16,7 +15,6 @@ DOWNLOAD_FOLDER = "downloads"
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# قاموس لحفظ الروابط مؤقتاً
 user_links = {}
 
 # =========================
@@ -104,23 +102,29 @@ def download_media(url, audio_only=False):
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredquality': '320',
             }]
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'best',
             'merge_output_format': 'mp4'
         })
         
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        file_path = ydl.prepare_filename(info)
+        
         if audio_only:
+            file_path = ydl.prepare_filename(info)
             file_path = file_path.rsplit(".", 1)[0] + ".mp3"
         else:
-            if not file_path.endswith(".mp4"):
-                file_path = file_path.rsplit(".", 1)[0] + ".mp4"
+            requested = info.get("requested_downloads")
+            if requested:
+                file_path = requested[0]["filepath"]
+            else:
+                file_path = ydl.prepare_filename(info)
+                if not file_path.endswith(".mp4"):
+                    file_path = file_path.rsplit(".", 1)[0] + ".mp4"
         return file_path
 
 # =========================
@@ -134,46 +138,27 @@ def callback_handler(call):
         return
 
     action = call.data
-    msg = bot.edit_message_text("جاري التحميل... ⏳", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("جاري التحميل بأعلى جودة... ⏳", call.message.chat.id, call.message.message_id)
     
     try:
-        # 1. معالجة صور التيك توك أولاً
-        if "tiktok.com" in url:
-            try:
-                api = f"https://www.tikwm.com/api/?url={url}"
-                res = requests.get(api, timeout=10).json()
-                data = res.get("data", {})
-                
-                # إذا الرابط عبارة عن صور
-                if data.get("images"):
-                    if action == "download_audio" and data.get("music"):
-                        audio_content = requests.get(data["music"], timeout=10).content
-                        bot.send_voice(call.message.chat.id, audio_content)
-                    else:
-                        media = []
-                        for img in data["images"][:10]: # ناخذ أول 10 صور حد أقصى
-                            media.append(InputMediaPhoto(img))
-                        sent = bot.send_media_group(call.message.chat.id, media)
-                        # ندز الصوت كبصمة ويه الصور
-                        if data.get("music"):
-                            audio_content = requests.get(data["music"], timeout=10).content
-                            bot.send_voice(call.message.chat.id, audio_content, reply_to_message_id=sent[0].message_id)
-                    
-                    bot.delete_message(call.message.chat.id, msg.message_id)
-                    return # نطلع لأن التحميل كمل
-            except Exception as e:
-                print("TikTok Photo API Error:", e) # إذا فشل الـ API، راح يكمل للـ yt-dlp كاحتياط
-
-        # 2. معالجة الفيديوات والصوت العادي (انستا، يوتيوب، تيك توك فيديو)
         if action == "download_audio":
             file_path = download_media(url, audio_only=True)
             with open(file_path, "rb") as audio:
                 bot.send_audio(call.message.chat.id, audio, title="Audio")
         else:
             file_path = download_media(url, audio_only=False)
-            with open(file_path, "rb") as video:
-                bot.send_document(call.message.chat.id, video, caption="تم التحميل بأعلى جودة ❤️")
-        
+            
+            # فحص نوع الملف حتى ندزه كملف او صوره
+            if file_path.endswith((".mp4", ".mkv", ".webm")):
+                with open(file_path, "rb") as video:
+                    bot.send_document(call.message.chat.id, video, caption="تم التحميل بأعلى جودة ❤️")
+            elif file_path.endswith((".jpg", ".jpeg", ".png", ".webp")):
+                with open(file_path, "rb") as photo:
+                    bot.send_photo(call.message.chat.id, photo, caption="تم التحميل ❤️")
+            else:
+                with open(file_path, "rb") as doc:
+                    bot.send_document(call.message.chat.id, doc, caption="تم التحميل ❤️")
+
         os.remove(file_path)
         bot.delete_message(call.message.chat.id, msg.message_id)
         
