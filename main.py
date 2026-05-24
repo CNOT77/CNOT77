@@ -65,7 +65,7 @@ def start(message):
     bot.reply_to(message, text)
 
 # =========================
-# TikWM API (مع خدعة الآيبي الوهمي)
+# TikWM API
 # =========================
 def fetch_tiktok_data(url):
     spoofed_ip = f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"
@@ -77,10 +77,8 @@ def fetch_tiktok_data(url):
     }
     api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
     response = requests.get(api_url, headers=headers, timeout=20)
-    
     print("TikWM Status:", response.status_code)
-    print("TikWM Response:", response.text[:300])
-    
+    print("TikWM Response:", response.text[:400])
     response.raise_for_status()
     data = response.json()
     return data.get("data", {})
@@ -124,20 +122,18 @@ def handle_tiktok(message):
             if media_group:
                 sent = bot.send_media_group(message.chat.id, media_group)
 
+                # الصوت — نحمله كـ bytes حتى يجي كبصمة صوتية (Voice)
                 music_url = data.get("music")
                 if music_url:
                     try:
+                        audio_bytes = requests.get(music_url, timeout=20).content
                         bot.send_voice(
                             message.chat.id,
-                            music_url,
+                            audio_bytes,
                             reply_to_message_id=sent[0].message_id
                         )
                     except Exception as ve:
                         print("Voice Error:", ve)
-                        bot.send_message(
-                            message.chat.id,
-                            "تم إرسال الصور، بس الصوت بي مشكلة من المصدر."
-                        )
 
         # ————————————————————————————
         # 2. فيديو
@@ -148,6 +144,7 @@ def handle_tiktok(message):
                 or data.get("play")
                 or data.get("wmplay")
             )
+            print("Video URL:", video_url[:80] if video_url else "None")
 
             if not video_url:
                 bot.edit_message_text(
@@ -165,7 +162,7 @@ def handle_tiktok(message):
 
         else:
             bot.edit_message_text(
-                "عذراً، ما گدرت أحصل البيانات المطلوبة من هذا الرابط.",
+                "عذراً، ما گدرت أحصل البيانات من هذا الرابط.",
                 message.chat.id, msg.message_id
             )
             return
@@ -198,8 +195,7 @@ def run_bot():
     bot.remove_webhook()
     bot.infinity_polling(
         timeout=60,
-        long_polling_timeout=60,
-        skip_pending=True
+        long_polling_timeout=60
     )
 
 if __name__ == "__main__":
