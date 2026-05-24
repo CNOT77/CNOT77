@@ -1,10 +1,10 @@
 import os
+import random
 import requests
 import telebot
 from flask import Flask
 from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-import yt_dlp
 
 # =========================
 # CONFIG
@@ -65,20 +65,27 @@ def start(message):
     bot.reply_to(message, text)
 
 # =========================
-# yt-dlp: استخراج معلومات الرابط
+# TikWM API (مع خدعة الآيبي الوهمي)
 # =========================
-def get_tiktok_info(url):
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
+def fetch_tiktok_data(url):
+    # توليد آيبي وهمي لخداع الحماية
+    spoofed_ip = f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.tikwm.com/",
+        "Accept": "application/json, text/plain, */*",
+        "X-Forwarded-For": spoofed_ip
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        return info
+    api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
+    response = requests.get(api_url, headers=headers, timeout=20)
+    
+    # الفحص اللي طلبه كلاود حتى نشوف الرد باللوكز
+    print("TikWM Status:", response.status_code)
+    print("TikWM Response:", response.text[:300])
+    
+    response.raise_for_status()
+    data = response.json()
+    return data.get("data", {})
 
 # =========================
 # TIKTOK DOWNLOADER
@@ -94,79 +101,90 @@ def handle_tiktok(message):
         return
 
     url = message.text.strip()
-    msg = bot.reply_to(message, "جاري التحميل المباشر... ⏳")
+    msg = bot.reply_to(message, "جاري التحميل... ⏳")
 
     try:
-        info = get_tiktok_info(url)
+        data = fetch_tiktok_data(url)
+
+        if not data:
+            bot.edit_message_text(
+                "صار خطأ، تأكد إن الرابط صحيح ومو خاص.",
+                message.chat.id, msg.message_id
+            )
+            return
 
         # ————————————————————————————
-        # 1. نظام الصور (Slideshow)
+        # 1. صور (Slideshow)
         # ————————————————————————————
-        entries = info.get("entries") or []
-        if entries:
+        if data.get("images"):
             media_group = []
-            for entry in entries[:10]:
-                thumb = entry.get("thumbnail") or entry.get("url")
-                if thumb:
-                    media_group.append(InputMediaPhoto(thumb))
+            for img in data["images"][:10]:
+                img_url = img if isinstance(img, str) else img.get("url", "")
+                if img_url:
+                    media_group.append(InputMediaPhoto(img_url))
 
             if media_group:
                 sent = bot.send_media_group(message.chat.id, media_group)
 
-                # جلب الصوت الخاص بالالبوم
-                music_url = info.get("music_url") or info.get("audio_url")
+                # تمرير الصوت مباشرة لتيليجرام لتوفير الرام
+                music_url = data.get("music")
                 if music_url:
-                    audio_bytes = requests.get(music_url, timeout=20).content
-                    bot.send_voice(
-                        message.chat.id,
-                        audio_bytes,
-                        reply_to_message_id=sent[0].message_id
-                    )
+                    try:
+                        bot.send_voice(
+                            message.chat.id,
+                            music_url,
+                            reply_to_message_id=sent[0].message_id
+                        )
+                    except Exception as ve:
+                        print("Voice Error:", ve)
+                        bot.send_message(
+                            message.chat.id,
+                            "تم إرسال الصور، بس الصوت بي مشكلة من المصدر."
+                        )
 
         # ————————————————————————————
-        # 2. نظام الفيديو الطبيعي
+        # 2. فيديو
         # ————————————————————————————
-        else:
-            formats = info.get("formats") or []
-            best_url = None
-            
-            # الفلترة الذكية: البحث عن الرابط المكتوب بيه هندسة الـ nowatermark أولاً
-            for f in formats:
-                if 'nowatermark' in f.get('format_id', '').lower():
-                    best_url = f.get('url')
-                    break
-            
-            # إذا ما لقى المسار النظيف، ياخذ أعلى جودة مشتغلة فيديو وصوت
-            if not best_url:
-                for f in reversed(formats):
-                    if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
-                        best_url = f.get('url')
-                        break
-            
-            # الاحتياط الأخير
-            if not best_url:
-                best_url = info.get("url")
+        elif data.get("play"):
+            video_url = (
+                data.get("hdplay")
+                or data.get("play")
+                or data.get("wmplay")
+            )
 
-            if not best_url:
+            if not video_url:
                 bot.edit_message_text(
                     "عذراً، ما گدرت أحمل هذا الرابط.",
                     message.chat.id, msg.message_id
                 )
                 return
 
+            # إرسال كـ URL مباشر بالشاشة (بدون تحميل كملف)
             bot.send_video(
                 message.chat.id,
-                best_url,
-                caption="تم التحميل بأعلى جودة مباشر 100% ❤️",
+                video_url,
+                caption="تم التحميل بأعلى جودة ❤️",
                 supports_streaming=True
             )
 
+        else:
+            bot.edit_message_text(
+                "عذراً، ما گدرت أحصل البيانات المطلوبة من هذا الرابط.",
+                message.chat.id, msg.message_id
+            )
+            return
+
         bot.delete_message(message.chat.id, msg.message_id)
 
-    except yt_dlp.utils.DownloadError as e:
-        print("yt-dlp Error:", e)
+    except requests.exceptions.Timeout:
         bot.edit_message_text(
-            "ما گدرت أحمل الرابط المباشر، جرب رابط ثاني أو تأكد إن الحساب عام.",
+            "السيرفر ما رد بوقته، جرب مرة ثانية ⏳",
+            message.chat.id, msg.message_id
+        )
+    except requests.exceptions.RequestException as e:
+        print("Request Error:", e)
+        bot.edit_message_text(
+            "صار خطأ بالاتصال بالسيرفر. جرب بعدين.",
             message.chat.id, msg.message_id
         )
     except Exception as e:
@@ -181,9 +199,12 @@ def handle_tiktok(message):
 # =========================
 def run_bot():
     print("Bot Started ✅")
-    # تنظيف تليكرام وضمان عدم حدوث تضارب 409
     bot.remove_webhook()
-    bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
+    bot.infinity_polling(
+        timeout=60,
+        long_polling_timeout=60,
+        skip_pending=True
+    )
 
 if __name__ == "__main__":
     Thread(target=run_web).start()
