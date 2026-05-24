@@ -67,19 +67,15 @@ def start(message):
 # FETCH FROM TIKLYDOWN API
 # =========================
 def fetch_tiktok_data(url):
+    """
+    يجيب بيانات التيك توك من tiklydown API.
+    يرجع dict أو None لو صار خطأ.
+    """
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    # إضافة User-Agent لخداع حماية السيرفرات وإقناعها بأننا متصفح طبيعي
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    response = requests.get(api_url, headers=headers, timeout=20)
-    
-    # طباعة نتائج الفحص مؤقتاً بالـ Logs لتبين المشكلة
-    print("Status Code:", response.status_code)
-    print("Response Text:", response.text[:500])
-    
+    response = requests.get(api_url, timeout=20)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    return data
 
 # =========================
 # TIKTOK DOWNLOADER
@@ -112,18 +108,17 @@ def handle_tiktok(message):
         # ————————————————————————————
         images = data.get("images")
         if images:
-            media_group = []
-            for img in images[:10]:
-                img_url = img.get("url")
-                if img_url:
-                    media_group.append(InputMediaPhoto(img_url))
-
+            # نبني الألبوم من الروابط مباشرة (بدون تحميل بالذاكرة)
+            media_group = [InputMediaPhoto(img_url) for img_url in images[:10]]
             sent = bot.send_media_group(message.chat.id, media_group)
 
-            music = data.get("music") or {}
-            music_url = music.get("play_url") or music.get("playUrl")
-            
+            # الصوت — tiklydown يرجعه بـ music أو music_info.play
+            music_url = (
+                data.get("music")
+                or (data.get("music_info") or {}).get("play")
+            )
             if music_url:
+                # نحمل الصوت بالذاكرة فقط لأن send_voice يحتاج bytes أو file_id
                 audio_bytes = requests.get(music_url, timeout=20).content
                 bot.send_voice(
                     message.chat.id,
@@ -135,12 +130,13 @@ def handle_tiktok(message):
         # 2. رابط فيديو
         # ————————————————————————————
         else:
+            # tiklydown يرجع الجودات بـ video.noWatermark أو video.originCover
             video = data.get("video") or {}
             video_url = (
-                video.get("noWatermarkHD") or 
-                video.get("noWatermark") or 
-                video.get("originDownloadAddr") or 
-                data.get("play")
+                video.get("noWatermark")          # بدون علامة مائية — أفضل خيار
+                or video.get("noWatermarkHD")     # HD بدون علامة مائية لو موجود
+                or video.get("originDownloadAddr") # رابط أصلي احتياطي
+                or data.get("play")               # fallback عام
             )
 
             if not video_url:
@@ -150,6 +146,7 @@ def handle_tiktok(message):
                 )
                 return
 
+            # نمرر الرابط مباشرة لتيليجرام — بدون تحميل بالذاكرة توفيراً للـ RAM
             bot.send_video(
                 message.chat.id,
                 video_url,
@@ -173,7 +170,7 @@ def handle_tiktok(message):
     except Exception as e:
         print("Unexpected Error:", e)
         bot.edit_message_text(
-            "صار خطأ أثناء التحميل. تأكد من الرابط أو جرب لاحقاً.",
+            "صار خطأ غير متوقع أثناء التحميل. جرب مرة ثانية.",
             message.chat.id, msg.message_id
         )
 
