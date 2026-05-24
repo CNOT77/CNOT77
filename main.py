@@ -68,7 +68,16 @@ def start(message):
 # =========================
 def fetch_tiktok_data(url):
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    response = requests.get(api_url, timeout=20)
+    # إضافة User-Agent لخداع حماية السيرفرات وإقناعها بأننا متصفح طبيعي
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    response = requests.get(api_url, headers=headers, timeout=20)
+    
+    # طباعة نتائج الفحص مؤقتاً بالـ Logs لتبين المشكلة
+    print("Status Code:", response.status_code)
+    print("Response Text:", response.text[:500])
+    
     response.raise_for_status()
     return response.json()
 
@@ -103,7 +112,6 @@ def handle_tiktok(message):
         # ————————————————————————————
         images = data.get("images")
         if images:
-            # تصليح المسار: الدخول للمفتاح ['url'] بداخل كل صورة بـ tiklydown
             media_group = []
             for img in images[:10]:
                 img_url = img.get("url")
@@ -112,7 +120,6 @@ def handle_tiktok(message):
 
             sent = bot.send_media_group(message.chat.id, media_group)
 
-            # تصليح مسار الصوت الخاص بـ tiklydown API
             music = data.get("music") or {}
             music_url = music.get("play_url") or music.get("playUrl")
             
@@ -129,7 +136,6 @@ def handle_tiktok(message):
         # ————————————————————————————
         else:
             video = data.get("video") or {}
-            # تقديم جودة الـ HD أولاً للحصول على أفضل دقة
             video_url = (
                 video.get("noWatermarkHD") or 
                 video.get("noWatermark") or 
