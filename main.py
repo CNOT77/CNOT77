@@ -4,6 +4,7 @@ import telebot
 from flask import Flask
 from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+import yt_dlp
 
 # =========================
 # CONFIG
@@ -64,23 +65,20 @@ def start(message):
     bot.reply_to(message, text)
 
 # =========================
-# FETCH FROM TIKLYDOWN API (المعدلة للفحص الجذري)
+# yt-dlp: استخراج معلومات الرابط
 # =========================
-def fetch_tiktok_data(url):
-    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+def get_tiktok_info(url):
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
     }
-    try:
-        response = requests.get(api_url, headers=headers, timeout=20)
-        # أسطر الفحص اللي طلبها كلاود حتى تطلع بالـ Logs نصاً
-        print("STATUS:", response.status_code)
-        print("BODY:", response.text[:500])
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print("FETCH ERROR:", str(e))
-        raise
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return info
 
 # =========================
 # TIKTOK DOWNLOADER
@@ -96,55 +94,60 @@ def handle_tiktok(message):
         return
 
     url = message.text.strip()
-    msg = bot.reply_to(message, "جاري التحميل... ⏳")
+    msg = bot.reply_to(message, "جاري التحميل المباشر... ⏳")
 
     try:
-        data = fetch_tiktok_data(url)
-
-        if not data:
-            bot.edit_message_text(
-                "صار خطأ، تأكد إن الرابط صحيح ومو خاص.",
-                message.chat.id, msg.message_id
-            )
-            return
+        info = get_tiktok_info(url)
 
         # ————————————————————————————
-        # 1. رابط صور (Slideshow)
+        # 1. نظام الصور (Slideshow)
         # ————————————————————————————
-        images = data.get("images")
-        if images:
+        entries = info.get("entries") or []
+        if entries:
             media_group = []
-            for img in images[:10]:
-                img_url = img.get("url")
-                if img_url:
-                    media_group.append(InputMediaPhoto(img_url))
+            for entry in entries[:10]:
+                thumb = entry.get("thumbnail") or entry.get("url")
+                if thumb:
+                    media_group.append(InputMediaPhoto(thumb))
 
-            sent = bot.send_media_group(message.chat.id, media_group)
+            if media_group:
+                sent = bot.send_media_group(message.chat.id, media_group)
 
-            music = data.get("music") or {}
-            music_url = music.get("play_url") or music.get("playUrl")
-            
-            if music_url:
-                audio_bytes = requests.get(music_url, timeout=20).content
-                bot.send_voice(
-                    message.chat.id,
-                    audio_bytes,
-                    reply_to_message_id=sent[0].message_id
-                )
+                # جلب الصوت الخاص بالالبوم
+                music_url = info.get("music_url") or info.get("audio_url")
+                if music_url:
+                    audio_bytes = requests.get(music_url, timeout=20).content
+                    bot.send_voice(
+                        message.chat.id,
+                        audio_bytes,
+                        reply_to_message_id=sent[0].message_id
+                    )
 
         # ————————————————————————————
-        # 2. رابط فيديو
+        # 2. نظام الفيديو الطبيعي
         # ————————————————————————————
         else:
-            video = data.get("video") or {}
-            video_url = (
-                video.get("noWatermarkHD") or 
-                video.get("noWatermark") or 
-                video.get("originDownloadAddr") or 
-                data.get("play")
-            )
+            formats = info.get("formats") or []
+            best_url = None
+            
+            # الفلترة الذكية: البحث عن الرابط المكتوب بيه هندسة الـ nowatermark أولاً
+            for f in formats:
+                if 'nowatermark' in f.get('format_id', '').lower():
+                    best_url = f.get('url')
+                    break
+            
+            # إذا ما لقى المسار النظيف، ياخذ أعلى جودة مشتغلة فيديو وصوت
+            if not best_url:
+                for f in reversed(formats):
+                    if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                        best_url = f.get('url')
+                        break
+            
+            # الاحتياط الأخير
+            if not best_url:
+                best_url = info.get("url")
 
-            if not video_url:
+            if not best_url:
                 bot.edit_message_text(
                     "عذراً، ما گدرت أحمل هذا الرابط.",
                     message.chat.id, msg.message_id
@@ -153,28 +156,23 @@ def handle_tiktok(message):
 
             bot.send_video(
                 message.chat.id,
-                video_url,
-                caption="تم التحميل بأعلى جودة ❤️",
+                best_url,
+                caption="تم التحميل بأعلى جودة مباشر 100% ❤️",
                 supports_streaming=True
             )
 
         bot.delete_message(message.chat.id, msg.message_id)
 
-    except requests.exceptions.Timeout:
+    except yt_dlp.utils.DownloadError as e:
+        print("yt-dlp Error:", e)
         bot.edit_message_text(
-            "السيرفر ما رد بوقته، جرب مرة ثانية بعد شوية ⏳",
-            message.chat.id, msg.message_id
-        )
-    except requests.exceptions.RequestException as e:
-        print("API Request Error:", e)
-        bot.edit_message_text(
-            "صار خطأ بالاتصال بالسيرفر. جرب بعدين.",
+            "ما گدرت أحمل الرابط المباشر، جرب رابط ثاني أو تأكد إن الحساب عام.",
             message.chat.id, msg.message_id
         )
     except Exception as e:
         print("Unexpected Error:", e)
         bot.edit_message_text(
-            "صار خطأ أثناء التحميل. تأكد من الرابط أو جرب لاحقاً.",
+            "صار خطأ أثناء التحميل. جرب بعد شوية.",
             message.chat.id, msg.message_id
         )
 
@@ -183,7 +181,9 @@ def handle_tiktok(message):
 # =========================
 def run_bot():
     print("Bot Started ✅")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30)
+    # تنظيف تليكرام وضمان عدم حدوث تضارب 409
+    bot.remove_webhook()
+    bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
 
 if __name__ == "__main__":
     Thread(target=run_web).start()
