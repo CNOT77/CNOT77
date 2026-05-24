@@ -13,9 +13,10 @@ CHANNEL_ID = "@naaafs"
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 # =========================
-# FLASK SERVER
+# FLASK SERVER (Keep Alive)
 # =========================
 app = Flask(__name__)
+
 @app.route('/')
 def home():
     return "I'm alive", 200
@@ -25,7 +26,7 @@ def run_web():
     app.run(host='0.0.0.0', port=port)
 
 # =========================
-# Check Subscription
+# CHECK SUBSCRIPTION
 # =========================
 def check_membership(user_id):
     try:
@@ -48,9 +49,13 @@ def subscription_markup():
 @bot.message_handler(commands=['start'])
 def start(message):
     if not check_membership(message.from_user.id):
-        bot.send_message(message.chat.id, "لازم تشترك بالقناة أولاً ❤️", reply_markup=subscription_markup())
+        bot.send_message(
+            message.chat.id,
+            "لازم تشترك بالقناة أولاً ❤️",
+            reply_markup=subscription_markup()
+        )
         return
-        
+
     text = (
         "هلا بيك ❤️\n\n"
         "دزلي رابط تيك توك (فيديو أو صور)\n"
@@ -59,64 +64,118 @@ def start(message):
     bot.reply_to(message, text)
 
 # =========================
+# FETCH FROM TIKLYDOWN API
+# =========================
+def fetch_tiktok_data(url):
+    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
+    response = requests.get(api_url, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+# =========================
 # TIKTOK DOWNLOADER
 # =========================
 @bot.message_handler(func=lambda m: m.text and "tiktok.com" in m.text)
 def handle_tiktok(message):
     if not check_membership(message.from_user.id):
-        bot.send_message(message.chat.id, "اشترك بالقناة أولاً ❤️", reply_markup=subscription_markup())
+        bot.send_message(
+            message.chat.id,
+            "اشترك بالقناة أولاً ❤️",
+            reply_markup=subscription_markup()
+        )
         return
 
     url = message.text.strip()
     msg = bot.reply_to(message, "جاري التحميل... ⏳")
-    
+
     try:
-        api = f"https://www.tikwm.com/api/?url={url}"
-        res = requests.get(api, timeout=20).json()
-        data = res.get("data", {})
-        
+        data = fetch_tiktok_data(url)
+
         if not data:
-            bot.edit_message_text("صار خطأ، تأكد إن الرابط صحيح ومو خاص.", message.chat.id, msg.message_id)
+            bot.edit_message_text(
+                "صار خطأ، تأكد إن الرابط صحيح ومو خاص.",
+                message.chat.id, msg.message_id
+            )
             return
 
-        # 1. إذا الرابط صور (Slideshow)
-        if data.get("images"):
-            media = []
-            for img in data["images"][:10]:
-                media.append(InputMediaPhoto(img))
+        # ————————————————————————————
+        # 1. رابط صور (Slideshow)
+        # ————————————————————————————
+        images = data.get("images")
+        if images:
+            # تصليح المسار: الدخول للمفتاح ['url'] بداخل كل صورة بـ tiklydown
+            media_group = []
+            for img in images[:10]:
+                img_url = img.get("url")
+                if img_url:
+                    media_group.append(InputMediaPhoto(img_url))
+
+            sent = bot.send_media_group(message.chat.id, media_group)
+
+            # تصليح مسار الصوت الخاص بـ tiklydown API
+            music = data.get("music") or {}
+            music_url = music.get("play_url") or music.get("playUrl")
             
-            sent = bot.send_media_group(message.chat.id, media)
-            
-            if data.get("music"):
-                audio_content = requests.get(data["music"], timeout=20).content
-                bot.send_voice(message.chat.id, audio_content, reply_to_message_id=sent[0].message_id)
-        
-        # 2. إذا الرابط فيديو
-        elif data.get("play"):
-            # فكرة صديقك: نجيب أفضل جودة متوفرة (HD)
-            video_url = data.get("hdplay") or data.get("play") or data.get("wmplay")
-            
-            # نرسله كـ فيديو حتى يشتغل بالشاشة مباشرة (مثل ما إنت طلبت)
+            if music_url:
+                audio_bytes = requests.get(music_url, timeout=20).content
+                bot.send_voice(
+                    message.chat.id,
+                    audio_bytes,
+                    reply_to_message_id=sent[0].message_id
+                )
+
+        # ————————————————————————————
+        # 2. رابط فيديو
+        # ————————————————————————————
+        else:
+            video = data.get("video") or {}
+            # تقديم جودة الـ HD أولاً للحصول على أفضل دقة
+            video_url = (
+                video.get("noWatermarkHD") or 
+                video.get("noWatermark") or 
+                video.get("originDownloadAddr") or 
+                data.get("play")
+            )
+
+            if not video_url:
+                bot.edit_message_text(
+                    "عذراً، ما گدرت أحمل هذا الرابط.",
+                    message.chat.id, msg.message_id
+                )
+                return
+
             bot.send_video(
                 message.chat.id,
                 video_url,
-                caption="تم التحميل بأعلى جودة ❤️"
+                caption="تم التحميل بأعلى جودة ❤️",
+                supports_streaming=True
             )
-        else:
-            bot.edit_message_text("عذراً، ما گدرت أحمل هذا الرابط.", message.chat.id, msg.message_id)
-            return
-            
+
         bot.delete_message(message.chat.id, msg.message_id)
-        
+
+    except requests.exceptions.Timeout:
+        bot.edit_message_text(
+            "السيرفر ما رد بوقته، جرب مرة ثانية بعد شوية ⏳",
+            message.chat.id, msg.message_id
+        )
+    except requests.exceptions.RequestException as e:
+        print("API Request Error:", e)
+        bot.edit_message_text(
+            "صار خطأ بالاتصال بالسيرفر. جرب بعدين.",
+            message.chat.id, msg.message_id
+        )
     except Exception as e:
-        print("Error:", e)
-        bot.edit_message_text("صار خطأ أثناء التحميل. السيرفر عليه ضغط، جرب بعدين.", message.chat.id, msg.message_id)
+        print("Unexpected Error:", e)
+        bot.edit_message_text(
+            "صار خطأ أثناء التحميل. تأكد من الرابط أو جرب لاحقاً.",
+            message.chat.id, msg.message_id
+        )
 
 # =========================
 # RUN
 # =========================
 def run_bot():
-    print("Bot Started")
+    print("Bot Started ✅")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
 
 if __name__ == "__main__":
