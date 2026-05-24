@@ -68,7 +68,6 @@ def start(message):
 # TikWM API (مع خدعة الآيبي الوهمي)
 # =========================
 def fetch_tiktok_data(url):
-    # توليد آيبي وهمي لخداع الحماية
     spoofed_ip = f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -79,7 +78,6 @@ def fetch_tiktok_data(url):
     api_url = f"https://www.tikwm.com/api/?url={url}&hd=1"
     response = requests.get(api_url, headers=headers, timeout=20)
     
-    # الفحص اللي طلبه كلاود حتى نشوف الرد باللوكز
     print("TikWM Status:", response.status_code)
     print("TikWM Response:", response.text[:300])
     
@@ -126,7 +124,6 @@ def handle_tiktok(message):
             if media_group:
                 sent = bot.send_media_group(message.chat.id, media_group)
 
-                # تمرير الصوت مباشرة لتيليجرام لتوفير الرام
                 music_url = data.get("music")
                 if music_url:
                     try:
@@ -159,7 +156,6 @@ def handle_tiktok(message):
                 )
                 return
 
-            # إرسال كـ URL مباشر بالشاشة (بدون تحميل كملف)
             bot.send_video(
                 message.chat.id,
                 video_url,
