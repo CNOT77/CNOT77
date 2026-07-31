@@ -138,7 +138,7 @@ def handle_tiktok(message):
         bot.edit_message_text("صار خطأ أثناء التحميل. جرب بعد شوية.", message.chat.id, msg.message_id)
 
 # =========================
-# VIDEO TO VIDEO NOTE (بصمة دائرية)
+# VIDEO TO VIDEO NOTE (بصمة دائرية - معدلة لتوفير الرام)
 # =========================
 @bot.message_handler(content_types=['video'])
 def handle_video_note(message):
@@ -150,7 +150,7 @@ def handle_video_note(message):
         )
         return
 
-    msg = bot.reply_to(message, "جاري تحويل الفيديو لبصمة دائرية... ⏳\n(ياخذ ثواني حسب حجم الفيديو)")
+    msg = bot.reply_to(message, "جاري تحويل الفيديو لبصمة دائرية... ⏳\n(قد يستغرق لحظات للفيديوهات عالية الجودة)")
     in_path = out_path = None
 
     try:
@@ -163,13 +163,13 @@ def handle_video_note(message):
 
         out_path = in_path.replace(".mp4", "_note.mp4")
 
-        # قص وتصغير الفيديو ليناسب شروط تليكرام
+        # تقليل الأبعاد لـ 480x480 واستخدام ultra-fast خفيف على الـ RAM
         cmd = [
             "ffmpeg", "-y", "-i", in_path,
             "-t", "60",
-            "-vf", "crop='min(iw,ih)':'min(iw,ih)',scale=640:640",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
+            "-vf", "scale=480:480:force_original_aspect_ratio=increase,crop=480:480",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-c:a", "aac", "-b:a", "96k",
             out_path
         ]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -180,15 +180,18 @@ def handle_video_note(message):
         bot.delete_message(message.chat.id, msg.message_id)
 
     except subprocess.CalledProcessError as e:
-        print("FFmpeg Error:", e.stderr)
-        bot.edit_message_text("صار خطأ بالتحويل، جرب فيديو ثاني.", message.chat.id, msg.message_id)
+        print("FFmpeg Error:", e.stderr.decode('utf-8', errors='ignore'))
+        bot.edit_message_text("صار خطأ بالتحويل، حجم أو دقة الفيديو عالية جداً.", message.chat.id, msg.message_id)
     except Exception as e:
         print("Video Note Error:", e)
-        bot.edit_message_text("صار خطأ اثناء التحويل.", message.chat.id, msg.message_id)
+        bot.edit_message_text("صار خطأ أثناء التحويل.", message.chat.id, msg.message_id)
     finally:
         for p in (in_path, out_path):
             if p and os.path.exists(p):
-                os.remove(p)
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
 # =========================
 # RUN
