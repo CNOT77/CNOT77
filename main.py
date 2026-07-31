@@ -119,7 +119,7 @@ def handle_tiktok(message):
                     except Exception as ve:
                         print("Voice Error:", ve)
                 
-                bot.delete_message(message.chat.id, msg.message_id)
+            bot.delete_message(message.chat.id, msg.message_id)
 
         elif data.get("play"):
             video_url = data.get("hdplay") or data.get("play") or data.get("wmplay")
@@ -138,7 +138,7 @@ def handle_tiktok(message):
         bot.edit_message_text("صار خطأ أثناء التحميل. جرب بعد شوية.", message.chat.id, msg.message_id)
 
 # =========================
-# VIDEO TO VIDEO NOTE (بصمة دائرية - معدلة لتوفير الرام)
+# VIDEO TO VIDEO NOTE (بصمة دائرية)
 # =========================
 @bot.message_handler(content_types=['video'])
 def handle_video_note(message):
@@ -150,7 +150,16 @@ def handle_video_note(message):
         )
         return
 
-    msg = bot.reply_to(message, "جاري تحويل الفيديو لبصمة دائرية... ⏳\n(قد يستغرق لحظات للفيديوهات عالية الجودة)")
+    # فحص حجم الملف (قانون تليكرام 20MB)
+    file_size = message.video.file_size
+    if file_size and file_size > 20 * 1024 * 1024:
+        bot.reply_to(
+            message,
+            "عذراً، الفيديو حجمه كبير (أكثر من 20MB). تليكرام يمنع البوتات من تحميل هيچ أحجام. دزلي فيديو حجمه أصغر! 💔"
+        )
+        return
+
+    msg = bot.reply_to(message, "جاري تحويل الفيديو لبصمة دائرية... ⏳\n(قد يتأخر قليلاً، يرجى الانتظار)")
     in_path = out_path = None
 
     try:
@@ -163,7 +172,6 @@ def handle_video_note(message):
 
         out_path = in_path.replace(".mp4", "_note.mp4")
 
-        # تقليل الأبعاد لـ 480x480 واستخدام ultra-fast خفيف على الـ RAM
         cmd = [
             "ffmpeg", "-y", "-i", in_path,
             "-t", "60",
@@ -172,19 +180,21 @@ def handle_video_note(message):
             "-c:a", "aac", "-b:a", "96k",
             out_path
         ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
 
         with open(out_path, "rb") as note:
             bot.send_video_note(message.chat.id, note)
 
         bot.delete_message(message.chat.id, msg.message_id)
 
-    except subprocess.CalledProcessError as e:
-        print("FFmpeg Error:", e.stderr.decode('utf-8', errors='ignore'))
-        bot.edit_message_text("صار خطأ بالتحويل، حجم أو دقة الفيديو عالية جداً.", message.chat.id, msg.message_id)
     except Exception as e:
         print("Video Note Error:", e)
-        bot.edit_message_text("صار خطأ أثناء التحويل.", message.chat.id, msg.message_id)
+        bot.edit_message_text(
+            "صار خطأ أثناء التحويل تأكد من جودة الفيديو تكون 480p و مدة الفيديو 60 ثانية او أقل و اعذرني راح يتأخر في التنزيل",
+            message.chat.id, 
+            msg.message_id
+        )
     finally:
         for p in (in_path, out_path):
             if p and os.path.exists(p):
