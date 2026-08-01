@@ -4,6 +4,7 @@ import requests
 import telebot
 import subprocess
 import tempfile
+import time
 from flask import Flask
 from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
@@ -204,12 +205,17 @@ def handle_video_note(message):
                     pass
 
 # =========================
-# RUN
+# RUN (مع ميزة إعادة التشغيل التلقائي عند الانقطاع)
 # =========================
 def run_bot():
-    print("Bot Started ✅")
-    bot.remove_webhook()
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    while True:
+        try:
+            print("Bot Started ✅")
+            bot.remove_webhook()
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print("Polling crashed, restarting in 5s... Error:", e)
+            time.sleep(5)
 
 if __name__ == "__main__":
     Thread(target=run_web).start()
